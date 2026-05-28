@@ -15,7 +15,7 @@ import threading
 import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any
+from typing import Any, Protocol
 
 from unitree_webrtc_connect.constants import RTC_TOPIC, SPORT_CMD
 from unitree_webrtc_connect.webrtc_driver import UnitreeWebRTCConnection, WebRTCConnectionMethod
@@ -38,6 +38,14 @@ STUNT_REACTIONS: dict[str, list[str]] = {
     "flip": ["StopMove", "BackFlip"],
     "backflip": ["StopMove", "BackFlip"],
 }
+
+
+class ReactionController(Protocol):
+    ip: str | None
+    method: str
+
+    async def react(self, reaction: str, unsafe: bool = False) -> dict[str, Any]:
+        ...
 
 
 def reaction_for_score(score: int) -> str:
@@ -443,7 +451,79 @@ class Go2ReactionController:
         return {"ok": True, "reaction": reaction, "ip": self.ip}
 
 
-def make_handler(loop: asyncio.AbstractEventLoop, controller: Go2ReactionController):
+class DimosLcmReactionController:
+    """Reaction controller that rides on DimOS' existing Go2 connection.
+
+    This avoids opening a second Go2 WebRTC session while DimOS owns the
+    camera/lidar/pointcloud stream. It publishes visible body motions through
+    the DimOS cmd_vel input instead of using Unitree sport-mode special moves.
+    """
+
+    ip: str | None = None
+    method = "dimos-lcm"
+
+    def __init__(self, topic: str = "/cmd_vel#geometry_msgs.Twist") -> None:
+        import lcm
+
+        self.topic = topic
+        self.lc = lcm.LCM()
+
+    def _twist(self, x: float = 0.0, z: float = 0.0) -> Any:
+        try:
+            from dimos.msgs.geometry_msgs.Twist import Twist
+        except Exception:
+            from dimos.msgs.geometry_msgs import Twist
+
+        msg = Twist()
+        msg.linear.x = float(x)
+        msg.linear.y = 0.0
+        msg.linear.z = 0.0
+        msg.angular.x = 0.0
+        msg.angular.y = 0.0
+        msg.angular.z = float(z)
+        return msg
+
+    def publish_twist(self, x: float = 0.0, z: float = 0.0) -> None:
+        msg = self._twist(x=x, z=z)
+        print(f"LCM {self.topic} x={x:.2f} z={z:.2f}", flush=True)
+        self.lc.publish(self.topic, msg.encode())
+
+    async def move_for(self, x: float = 0.0, z: float = 0.0, duration: float = 0.7) -> None:
+        self.publish_twist(x=x, z=z)
+        await asyncio.sleep(duration)
+        self.publish_twist()
+        await asyncio.sleep(0.15)
+
+    async def react(self, reaction: str, unsafe: bool = False) -> dict[str, Any]:
+        sequences: dict[str, list[tuple[float, float, float]]] = {
+            "cry": [(0.0, 0.9, 0.7), (0.0, -0.9, 0.7), (0.0, 0.75, 0.55), (0.0, -0.75, 0.55)],
+            "concerned": [(0.0, 0.65, 0.55), (0.0, -0.65, 0.55)],
+            "skeptical": [(0.0, 0.75, 0.7), (0.0, -0.75, 0.7), (0.0, 0.35, 0.35)],
+            "curious": [(0.0, 0.5, 0.45), (0.0, -0.5, 0.45)],
+            "respect": [(0.12, 0.0, 0.45), (-0.12, 0.0, 0.45)],
+            "approve": [(0.0, 0.45, 0.45), (0.0, -0.45, 0.45), (0.0, 0.45, 0.45)],
+            "celebrate": [(0.0, 0.95, 0.9), (0.0, -0.95, 0.9)],
+            "legendary": [(0.0, 1.1, 1.0), (0.0, -1.1, 1.0), (0.15, 0.0, 0.5), (-0.15, 0.0, 0.5)],
+            "fingerheart": [(0.0, 0.95, 0.7), (0.0, -0.95, 0.7)],
+            "recover": [(0.0, 0.0, 0.2)],
+            "flip": [(0.0, 1.1, 1.0), (0.0, -1.1, 1.0)],
+            "backflip": [(0.0, 1.1, 1.0), (0.0, -1.1, 1.0)],
+        }
+        if reaction not in sequences:
+            raise ValueError(f"Unsupported reaction: {reaction}")
+        for x, z, duration in sequences[reaction]:
+            await self.move_for(x=x, z=z, duration=duration)
+        self.publish_twist()
+        return {
+            "ok": True,
+            "reaction": reaction,
+            "mode": "dimos-lcm",
+            "topic": self.topic,
+            "note": "Published cmd_vel through DimOS. Special sport moves are not used in this mode.",
+        }
+
+
+def make_handler(loop: asyncio.AbstractEventLoop, controller: ReactionController | None):
     class Handler(BaseHTTPRequestHandler):
         def _send(self, status: int, body: dict[str, Any]) -> None:
             data = json.dumps(body).encode("utf-8")
@@ -465,9 +545,10 @@ def make_handler(loop: asyncio.AbstractEventLoop, controller: Go2ReactionControl
                     200,
                     {
                         "ok": True,
-                        "ip": controller.ip,
-                        "method": controller.method,
+                        "ip": controller.ip if controller else None,
+                        "method": controller.method if controller else "judge-only",
                         "judge": "dimos",
+                        "robotActions": controller is not None,
                         "minimaxConfigured": bool(os.environ.get("MINIMAX_API_KEY")),
                     },
                 )
@@ -486,6 +567,15 @@ def make_handler(loop: asyncio.AbstractEventLoop, controller: Go2ReactionControl
 
             if self.path != "/react":
                 self._send(404, {"error": "not found"})
+                return
+            if controller is None:
+                self._send(
+                    409,
+                    {
+                        "error": "Robot action bridge is disabled in judge-only mode",
+                        "hint": "Stop DimOS point cloud and restart this server without --judge-only to test Go2 actions.",
+                    },
+                )
                 return
             try:
                 reaction = str(payload.get("reaction", "nod"))
@@ -506,15 +596,41 @@ def main() -> None:
     parser.add_argument("--ip", default=os.environ.get("ROBOT_IP", "172.20.10.13"))
     parser.add_argument("--method", default=os.environ.get("GO2_CONN_METHOD", "LocalSTA"))
     parser.add_argument("--port", type=int, default=int(os.environ.get("GO2_REACTION_PORT", "8788")))
+    parser.add_argument(
+        "--judge-only",
+        action="store_true",
+        help="Serve MiniMax judging without opening a Go2 WebRTC connection. Use this while DimOS owns the robot stream.",
+    )
+    parser.add_argument(
+        "--dimos-lcm-actions",
+        action="store_true",
+        help="Send reactions as DimOS cmd_vel LCM messages so pointcloud/camera can stay connected.",
+    )
+    parser.add_argument(
+        "--dimos-cmd-vel-topic",
+        default=os.environ.get("DIMOS_CMD_VEL_TOPIC", "/cmd_vel#geometry_msgs.Twist"),
+        help="LCM topic used by DimOS GO2Connection for velocity commands.",
+    )
     args = parser.parse_args()
 
     loop = asyncio.new_event_loop()
-    controller = Go2ReactionController(args.ip, args.method)
+    if args.judge_only:
+        controller: ReactionController | None = None
+    elif args.dimos_lcm_actions:
+        controller = DimosLcmReactionController(topic=args.dimos_cmd_vel_topic)
+    else:
+        controller = Go2ReactionController(args.ip, args.method)
     thread = threading.Thread(target=loop.run_forever, daemon=True)
     thread.start()
 
     server = ThreadingHTTPServer(("127.0.0.1", args.port), make_handler(loop, controller))
-    print(f"Go2 reaction server listening on http://127.0.0.1:{args.port}", flush=True)
+    if args.judge_only:
+        mode = "judge-only"
+    elif args.dimos_lcm_actions:
+        mode = "dimos-lcm-actions"
+    else:
+        mode = "reaction"
+    print(f"Go2 {mode} server listening on http://127.0.0.1:{args.port}", flush=True)
     try:
         server.serve_forever()
     finally:

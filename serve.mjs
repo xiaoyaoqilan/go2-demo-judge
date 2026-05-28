@@ -37,43 +37,19 @@ function extractJson(text) {
   return JSON.parse(raw.slice(start, end + 1));
 }
 
-function fallbackScore(transcript = "", screenshotCount = 0) {
-  const normalized = transcript.toLowerCase();
-  const words = transcript.trim().split(/\s+/).filter(Boolean).length;
-  const keywordGroups = {
-    mission_fit: ["mission", "task", "suit", "robotic dog", "go2", "unitree", "environment", "hardware"],
-    action_feasibility: ["action", "motion", "movement", "command", "webrtc", "localap", "physically", "safe"],
-    dog_advantage: ["advantage", "outperform", "replace", "real dog", "safer", "patrol", "terrain", "autonomous"],
-    use_reality: ["real use", "real-world", "field", "deployment", "scenario", "setup", "use case", "practical"],
-  };
-  const dimensions = Object.fromEntries(
-    Object.entries(keywordGroups).map(([key, keywords]) => {
-      const hits = keywords.reduce((count, keyword) => count + (normalized.includes(keyword) ? 1 : 0), 0);
-      const lengthBonus = Math.min(12, Math.floor(words / 22));
-      const screenshotBonus = Math.min(10, screenshotCount * 4);
-      const keywordBonus = Math.min(24, hits * 6);
-      return [key, Math.max(45, Math.min(88, 52 + lengthBonus + screenshotBonus + keywordBonus))];
-    }),
-  );
-  const total = Math.round(
-    dimensions.mission_fit * 0.25 +
-      dimensions.action_feasibility * 0.25 +
-      dimensions.dog_advantage * 0.25 +
-      dimensions.use_reality * 0.25,
-  );
-  return {
-    total_score: total,
-    dimensions,
-    dimension_reasons: {
-      mission_fit: "Fallback checks whether the pitch mentions a concrete Unitree Go2 mission, setup, or hardware fit.",
-      action_feasibility: "Fallback checks whether the pitch names concrete robot actions, motion commands, or safety constraints.",
-      dog_advantage: "Fallback checks whether the pitch explains why a robotic dog is better or safer than a real dog or ordinary camera.",
-      use_reality: "Fallback checks whether the pitch gives a real-world use case, field scenario, or practical deployment context.",
-    },
-    evidence: ["Local fallback scoring used because MiniMax was not available."],
-    questions: ["Which part of the demo is live, and which part is simulated?"],
-    verdict: "Fallback score generated locally.",
-  };
+async function fetchWithTimeout(url, options = {}, timeoutMs = 25000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } catch (error) {
+    if (error.name === "AbortError") {
+      throw new Error(`Request timed out after ${Math.round(timeoutMs / 1000)}s: ${url}`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function reactionFor(score) {
@@ -147,7 +123,7 @@ async function callMiniMaxJudge(payload) {
 async function callDimosJudge(payload) {
   const judgeServer = process.env.DIMOS_JUDGE_SERVER;
   if (!judgeServer) throw new Error("DIMOS_JUDGE_SERVER is not configured");
-  const response = await fetch(`${judgeServer.replace(/\/$/, "")}/judge`, {
+  const response = await fetchWithTimeout(`${judgeServer.replace(/\/$/, "")}/judge`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(payload),
@@ -219,10 +195,11 @@ async function handleApi(req, res, pathname) {
           sendJson(res, 200, dimosPayload);
           return;
         } catch (error) {
-          const result = fallbackScore(payload.transcript, payload.screenshotCount);
-          result.error = error.message;
-          result.reaction = reactionFor(Number(result.total_score || 0));
-          sendJson(res, 200, { provider: "dimos-unreachable-fallback", result });
+          sendJson(res, 502, {
+            provider: "dimos-minimax-error",
+            error: error.message,
+            message: "MiniMax did not return a real model judgment.",
+          });
           return;
         }
       }
@@ -232,9 +209,12 @@ async function handleApi(req, res, pathname) {
       try {
         result = await callMiniMaxJudge(payload);
       } catch (error) {
-        provider = "local-fallback";
-        result = fallbackScore(payload.transcript, payload.screenshotCount);
-        result.error = error.message;
+        sendJson(res, 502, {
+          provider: "minimax-error",
+          error: error.message,
+          message: "MiniMax did not return a real model judgment.",
+        });
+        return;
       }
       result.reaction = reactionFor(Number(result.total_score || 0));
       sendJson(res, 200, { provider, result });

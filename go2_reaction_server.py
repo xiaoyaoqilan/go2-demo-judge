@@ -110,7 +110,8 @@ def extract_json(text: str) -> dict[str, Any]:
 def parse_score_line(text: str, label: str) -> int:
     prefix = f"{label}:"
     for line in text.splitlines():
-        if line.strip().lower().startswith(prefix.lower()):
+        normalized = line.strip().replace("*", "")
+        if normalized.lower().startswith(prefix.lower()):
             digits = "".join(ch if ch.isdigit() else " " for ch in line).split()
             if digits:
                 return max(0, min(100, int(digits[0])))
@@ -123,10 +124,11 @@ def section_bullets(text: str, section: str) -> list[str]:
     in_section = False
     for line in lines:
         stripped = line.strip()
-        if stripped.lower().startswith(f"{section.lower()}:"):
+        normalized = stripped.replace("*", "")
+        if normalized.lower().startswith(f"{section.lower()}:"):
             in_section = True
             continue
-        if in_section and stripped.endswith(":") and not stripped.startswith("-"):
+        if in_section and normalized.endswith(":") and not stripped.startswith("-"):
             break
         if in_section and stripped.startswith("-"):
             output.append(stripped[1:].strip())
@@ -134,11 +136,15 @@ def section_bullets(text: str, section: str) -> list[str]:
 
 
 def parse_minimax_verdict(text: str) -> dict[str, Any]:
+    mission_raw = parse_score_line(text, "Mission Fit")
+    action_raw = parse_score_line(text, "Action Feasibility")
+    dog_raw = parse_score_line(text, "Dog Advantage")
+    field_raw = parse_score_line(text, "Field Readiness")
     dimensions = {
-        "mission_fit": parse_score_line(text, "Mission Fit") * 4,
-        "action_feasibility": parse_score_line(text, "Action Feasibility") * 4,
-        "dog_advantage": parse_score_line(text, "Dog Advantage") * 4,
-        "use_reality": parse_score_line(text, "Field Readiness") * 4,
+        "mission_fit": mission_raw * 4,
+        "action_feasibility": action_raw * 4,
+        "dog_advantage": dog_raw * 4,
+        "use_reality": field_raw * 4,
     }
     total = parse_score_line(text, "Total Score")
     if not total:
@@ -146,29 +152,31 @@ def parse_minimax_verdict(text: str) -> dict[str, Any]:
 
     verdict = ""
     for line in text.splitlines():
-        if line.strip().lower().startswith("verdict:"):
-            verdict = line.split(":", 1)[1].strip()
+        normalized = line.strip().replace("*", "")
+        if normalized.lower().startswith("verdict:"):
+            verdict = normalized.split(":", 1)[1].strip()
             break
 
     visible = section_bullets(text, "Visible Evidence")
     missing = section_bullets(text, "Missing Proof")
     final_dog = ""
     for line in text.splitlines():
-        if line.strip().lower().startswith("final dog verdict:"):
-            final_dog = line.split(":", 1)[1].strip()
+        normalized = line.strip().replace("*", "")
+        if normalized.lower().startswith("final dog verdict:"):
+            final_dog = normalized.split(":", 1)[1].strip()
             break
 
     return {
         "total_score": max(0, min(100, total)),
         "dimensions": dimensions,
         "dimension_reasons": {
-            "mission_fit": "Judged against whether the project truly suits a Unitree Go2-type quadruped body and setup.",
-            "action_feasibility": "Judged against whether the claimed action is physically realistic for Go2 posture, balance, terrain, motion, reach, and payload.",
-            "dog_advantage": "Judged against whether the robot dog clearly beats or more safely replaces a real dog.",
-            "use_reality": "Judged against whether the visible demo setting matches the claimed real-world use case.",
+            "mission_fit": visible[0] if len(visible) > 0 else "The model judged whether the mission fits a Unitree Go2 body and setup.",
+            "action_feasibility": visible[1] if len(visible) > 1 else "The model judged whether the claimed actions are physically realistic for Go2.",
+            "dog_advantage": missing[0] if len(missing) > 0 else "The model judged whether the robot dog has a clear advantage over alternatives.",
+            "use_reality": missing[1] if len(missing) > 1 else "The model judged whether the shown setup matches the claimed real-world use.",
         },
-        "evidence": visible,
-        "questions": [f"Missing proof: {item}" for item in missing],
+        "evidence": [item for item in visible[:3]],
+        "questions": [f"Missing proof: {item}" for item in missing[:3]],
         "verdict": f"{verdict} {final_dog}".strip(),
         "raw_verdict": text,
     }
@@ -318,18 +326,20 @@ def call_minimax_judge(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def judge_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    provider = "dimos-minimax"
-    try:
-        result = call_minimax_judge(payload)
-    except Exception as exc:
-        provider = "dimos-local-fallback"
-        result = fallback_score(str(payload.get("transcript") or ""), int(payload.get("screenshotCount") or 0))
-        result["error"] = str(exc)
-
+    result = call_minimax_judge(payload)
+    if not result.get("dimension_reasons"):
+        evidence = result.get("evidence") or []
+        questions = result.get("questions") or []
+        result["dimension_reasons"] = {
+            "mission_fit": evidence[0] if len(evidence) > 0 else "The model judged whether the mission fits a Unitree Go2 body and setup.",
+            "action_feasibility": evidence[1] if len(evidence) > 1 else "The model judged whether the shown action is physically feasible for Go2.",
+            "dog_advantage": questions[0] if len(questions) > 0 else "The model judged whether the robot dog has a clear advantage over alternatives.",
+            "use_reality": questions[1] if len(questions) > 1 else "The model judged whether the shown setup matches the claimed real-world use.",
+        }
     score = int(round(float(result.get("total_score") or 0)))
     result["total_score"] = max(0, min(100, score))
     result["reaction"] = reaction_for_score(result["total_score"])
-    return {"provider": provider, "result": result}
+    return {"provider": "dimos-minimax", "result": result}
 
 
 class Go2ReactionController:

@@ -57,6 +57,12 @@ const state = {
 
 const $ = (id) => document.getElementById(id);
 
+function setEvidenceItems(items) {
+  const evidenceList = $("evidenceList");
+  if (!evidenceList) return;
+  evidenceList.innerHTML = items.filter(Boolean).map((item) => `<div>${item}</div>`).join("");
+}
+
 function scoreText(text, screenshotCount) {
   const normalized = text.toLowerCase();
   const wordCount = text.trim().split(/\s+/).filter(Boolean).length;
@@ -289,25 +295,17 @@ function renderEvidence(projectName, text, screenshotCount, total) {
     .map((line) => line.trim())
     .find(Boolean);
 
-  const evidence = [
+  setEvidenceItems([
     `Project: ${projectName || "Untitled"}. Overall score: ${total}/100.`,
     firstLine ? `Pitch evidence: ${firstLine.slice(0, 140)}` : "Pitch evidence: no transcript yet.",
     `Visual evidence: ${screenshotCount} captured frame(s).`,
     "Judge question: What part is actually running live, and what part is simulated?",
     "Judge question: How do you prevent a slide or speech prompt from manipulating the scoring model?",
-  ];
-
-  $("evidenceList").innerHTML = evidence.map((item) => `<div>${item}</div>`).join("");
+  ]);
 }
 
 function renderModelEvidence(result, provider) {
-  const evidence = [
-    `Provider: ${provider}.`,
-    ...(result.evidence || []),
-    ...(result.questions || []).map((q) => `Judge question: ${q}`),
-    result.error ? `Fallback reason: ${result.error}` : "",
-  ].filter(Boolean);
-  $("evidenceList").innerHTML = evidence.map((item) => `<div>${item}</div>`).join("");
+  setEvidenceItems([`Provider: ${provider}.`, result.verdict || ""]);
 }
 
 function renderDog(reaction, score) {
@@ -324,17 +322,6 @@ function renderDog(reaction, score) {
   $("commandOutput").textContent = state.lastCommand;
 }
 
-function renderActionModules({ source, score, reaction, provider = "local scoring", dispatched = false }) {
-  const transcriptWords = $("pitchText").value.trim().split(/\s+/).filter(Boolean).length;
-  const frameCount = state.screenshots.length;
-  $("captureModule").textContent = `${transcriptWords} transcript word(s), ${frameCount} visual frame(s), source=${source}.`;
-  $("judgeModule").textContent = `${provider} returned ${score}/100.`;
-  $("routerModule").textContent = `${score} routed to ${reactionNameForScore(score)} via score band policy.`;
-  $("bridgeModule").textContent = dispatched
-    ? "Dispatch enabled. Sending selected module to Go2 bridge."
-    : "Dispatch disabled. Module selected, robot command held for review.";
-}
-
 async function maybeReact(score, source = "manual", options = {}) {
   const reaction = reactionNameForScore(score);
   const changed = reaction !== state.lastReaction;
@@ -342,10 +329,7 @@ async function maybeReact(score, source = "manual", options = {}) {
 
   if (state.voiceReaction) browserSpeak(`Score ${score}. ${voiceLineForScore(score)}`);
 
-  if (!state.go2Armed) {
-    if (source === "manual-score") addTimeline("Go2 armed is off; score updated without robot motion");
-    return;
-  }
+  if (!state.go2Armed) return;
   if (!changed && !options.force) return;
   await sendGo2Reaction(reaction, source);
 }
@@ -362,34 +346,10 @@ function judge(source = "manual") {
   renderScores(items, total);
   renderEvidence(projectName, text, state.screenshots.length, total);
   renderDog(reaction, total);
-  renderActionModules({ source, score: total, reaction, provider: "local scoring", dispatched: state.go2Armed });
   $("judgeStatus").textContent = `Scored from ${source}`;
   $("dogStatus").textContent = `Go2: ${reaction.name}`;
   addTimeline(`${projectName || "Untitled"} scored ${total}; reaction ${reaction.name}`);
   maybeReact(total, source);
-}
-
-async function triggerManualScore() {
-  const total = Number($("manualScore").value);
-  const reaction = reactionForScore(total);
-  state.lastScore = total;
-  state.lastVerdict = `Manual judge test score ${total}. Reaction ${reaction.name}.`;
-
-  renderScores(
-    rubric.map((item) => ({
-      ...item,
-      score: total,
-      reason: `${item.label}: manual score test, not model output.`,
-    })),
-    total,
-  );
-  renderEvidence($("projectName").value.trim(), $("pitchText").value.trim(), state.screenshots.length, total);
-  renderDog(reaction, total);
-  renderActionModules({ source: "router-test", score: total, reaction, provider: "manual score", dispatched: state.go2Armed });
-  $("judgeStatus").textContent = `Manual score ${total}`;
-  $("dogStatus").textContent = `Go2: ${reaction.name}`;
-  addTimeline(`Manual score ${total}; reaction ${reaction.name}`);
-  await maybeReact(total, "manual-score", { force: true });
 }
 
 async function judgeWithModel(source = "model") {
@@ -422,14 +382,19 @@ async function judgeWithModel(source = "model") {
     const verdictEl = $("verdictText");
     verdictEl.textContent = state.lastVerdict;
     verdictEl.style.display = "";
-    renderActionModules({ source, score: total, reaction, provider: payload.provider, dispatched: state.go2Armed });
     $("judgeStatus").textContent = `Scored by ${payload.provider}`;
     $("dogStatus").textContent = `Go2: ${reaction.name}`;
     addTimeline(`${projectName || "Untitled"} model scored ${total}; reaction ${reaction.name}`);
     await maybeReact(total, source);
   } catch (error) {
     addTimeline(`Model judge failed: ${error.message}`);
-    judge(source);
+    $("judgeStatus").textContent = "MiniMax unavailable";
+    $("dogStatus").textContent = "Go2: waiting for real score";
+    setEvidenceItems([
+      "MiniMax did not return a real model judgment.",
+      "No fallback score was generated.",
+      `Reason: ${error.message}`,
+    ]);
   }
 }
 
@@ -449,7 +414,7 @@ async function refreshHealth() {
     const response = await fetch("/api/health");
     const health = await response.json();
     const bridge = health.go2ReactionServer ? "Real bridge configured" : "Demo mode";
-    const model = health.minimaxConfigured ? health.model : "local fallback";
+    const model = health.dimosJudgeServer ? "dimos-minimax" : health.minimaxConfigured ? health.model : "MiniMax not configured";
     $("bridgeStatus").textContent = bridge;
     $("bridgeDetail").textContent = `Robot ${health.robotIp}; scoring ${model}; real actions ${
       health.go2ReactionEnabled || health.go2ReactionServer ? "available when armed" : "off by default"
@@ -704,11 +669,10 @@ async function startLivePitch() {
 
 function toggleGo2Armed() {
   state.go2Armed = !state.go2Armed;
-  $("go2Btn").textContent = state.go2Armed ? "Robot dispatch: ON" : "Robot dispatch: OFF";
-  $("go2Btn").className = state.go2Armed ? "dispatch-btn dispatch-on" : "dispatch-btn";
-  $("bridgeModule").textContent = state.go2Armed
-    ? "Dispatch enabled. The next score will call the Go2 action bridge."
-    : "Dispatch disabled. Scores update the selected module without moving Go2.";
+  if ($("go2Btn")) {
+    $("go2Btn").textContent = state.go2Armed ? "Robot dispatch: ON" : "Robot dispatch: OFF";
+    $("go2Btn").className = state.go2Armed ? "dispatch-btn dispatch-on" : "dispatch-btn";
+  }
   addTimeline(state.go2Armed ? "Auto dispatch armed" : "Auto dispatch disarmed");
 }
 
@@ -736,14 +700,9 @@ async function sendGo2Reaction(reaction = reactionNameForScore(state.lastScore),
     if (!response.ok) throw new Error(payload.error || payload.stderr || "Go2 reaction failed");
     const upstreamError = payload.upstream?.error || payload.reactionServerError || "";
     $("dogStatus").textContent = `Go2: ${payload.mode} ${reaction}`;
-    $("bridgeModule").textContent =
-      payload.mode === "dry-run"
-        ? "Dry-run complete. Start the WSL bridge to execute on the real Go2."
-        : `Bridge accepted ${reaction}.`;
     addTimeline(`Go2 ${payload.mode}: ${reaction}${upstreamError ? ` (${upstreamError})` : ""}`);
   } catch (error) {
     $("dogStatus").textContent = "Go2: reaction failed";
-    $("bridgeModule").textContent = `Bridge failed: ${error.message}`;
     addTimeline(`Go2 reaction failed: ${error.message}`);
   }
 }
@@ -839,7 +798,6 @@ $("projectName").addEventListener("input", scheduleJudge);
 $("projectName").addEventListener("change", scheduleJudge);
 $("screenshotInput").addEventListener("change", handleScreenshots);
 $("sendGo2Btn").addEventListener("click", () => sendGo2Reaction());
-$("manualScoreBtn").addEventListener("click", triggerManualScore);
 $("clearBtn").addEventListener("click", () => {
   $("timelineItems").innerHTML = "";
 });

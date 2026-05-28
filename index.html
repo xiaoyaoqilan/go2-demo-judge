@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>JudgeDog Go2</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Online Submission Build</p>
+          <h1>JudgeDog Go2</h1>
+        </div>
+        <div class="status-strip">
+          <span id="judgeStatus">Local scoring ready</span>
+          <span id="dogStatus">Go2: standby</span>
+        </div>
+      </header>
+
+      <section class="submission-brief">
+        <div>
+          <strong>Multimodal hackathon judge for Unitree Go2</strong>
+          <p>Web demo scores pitch text and visual evidence. Submitted videos validate the real robot reactions.</p>
+        </div>
+        <div class="proof-chips">
+          <span>Online scorer</span>
+          <span>Internal action router</span>
+          <span>Go2 hardware bridge</span>
+        </div>
+      </section>
+
+      <section class="demo-strip">
+        <article>
+          <span>Preset</span>
+          <strong>Strong Pitch</strong>
+          <p>Load a high-scoring pitch, then route it through the same action pipeline.</p>
+          <button id="highDemoBtn" class="ghost-btn" type="button">Load 92 preset</button>
+        </article>
+        <article>
+          <span>Preset</span>
+          <strong>Weak Evidence</strong>
+          <p>Load an under-proven pitch, then route it to a skeptical Go2 reaction.</p>
+          <button id="skepticalDemoBtn" class="ghost-btn" type="button">Load 72 preset</button>
+        </article>
+        <article class="bridge-card">
+          <span>Robot Link</span>
+          <strong id="bridgeStatus">Checking bridge...</strong>
+          <p id="bridgeDetail">Target Go2 and scoring provider will appear here.</p>
+        </article>
+      </section>
+
+      <section class="workspace">
+        <aside class="panel input-panel">
+          <div class="panel-head">
+            <h2>Online Scoring Input</h2>
+            <button id="loadSampleBtn" class="ghost-btn" type="button">Sample</button>
+          </div>
+
+          <label class="field">
+            <span>Project name</span>
+            <input id="projectName" value="Untitled Hack" placeholder="Team or project name" />
+          </label>
+
+          <div class="capture-grid">
+            <button id="micBtn" class="ghost-btn" type="button">Start mic</button>
+            <button id="go2ViewBtn" class="ghost-btn" type="button">Start Go2 view capture</button>
+            <button id="cameraBtn" class="ghost-btn" type="button">Use laptop camera</button>
+            <button id="snapshotBtn" class="ghost-btn" type="button">Snapshot</button>
+            <button id="pasteShotBtn" class="ghost-btn" type="button">Paste Go2 screenshot</button>
+            <button id="autoBtn" class="ghost-btn" type="button">Auto judge off</button>
+            <button id="modelBtn" class="ghost-btn" type="button">Model judge on</button>
+            <button id="speakBtn" class="ghost-btn" type="button">Speak verdict</button>
+            <button id="liveBtn" class="primary-btn" type="button">Start capture</button>
+            <button id="go2Btn" class="dispatch-btn" type="button">Robot dispatch: OFF</button>
+            <button id="voiceBtn" class="ghost-btn" type="button">Voice reaction on</button>
+          </div>
+
+          <div class="go2-links">
+            <a href="http://127.0.0.1:9090/?url=rerun%2Bhttp%3A%2F%2F127.0.0.1%3A9877%2Fproxy" target="_blank">Open Go2 Rerun Camera</a>
+            <a href="http://127.0.0.1:7779" target="_blank">Open dimos Web View</a>
+          </div>
+
+          <div id="cameraBox" class="camera-box" data-source="GO2 VIEW">
+            <video id="cameraPreview" autoplay muted playsinline></video>
+            <canvas id="snapshotCanvas"></canvas>
+          </div>
+
+          <label class="field">
+            <span>Transcript / pitch text</span>
+            <textarea id="pitchText" placeholder="Paste pitch text, or use Start mic for live transcription."></textarea>
+          </label>
+
+          <label class="field">
+            <span>Manual screenshots</span>
+            <input id="screenshotInput" type="file" accept="image/*" multiple />
+          </label>
+
+          <div id="screenshots" class="screenshots"></div>
+
+          <button id="scoreBtn" class="primary-btn" type="button">Judge & dispatch</button>
+        </aside>
+
+        <section class="panel score-panel">
+          <div class="panel-head">
+            <h2>Scoreboard</h2>
+            <span id="scoreBadge" class="score-badge">--</span>
+          </div>
+
+          <div class="meter">
+            <div id="scoreFill" class="meter-fill"></div>
+          </div>
+
+          <div class="manual-score">
+            <label for="manualScore">Action router test score</label>
+            <input id="manualScore" type="range" min="0" max="100" value="80" />
+            <button id="manualScoreBtn" class="ghost-btn" type="button">Route score</button>
+          </div>
+
+          <div id="rubricList" class="rubric-list"></div>
+
+          <div class="evidence">
+            <h3>Evidence and judge questions</h3>
+            <div id="evidenceList" class="evidence-list"></div>
+          </div>
+        </section>
+
+        <aside class="panel dog-panel">
+          <div class="panel-head">
+            <h2>Action Router</h2>
+            <button id="safeModeBtn" class="safe-on" type="button">Safe mode on</button>
+          </div>
+
+          <div id="dogAvatar" class="dog-avatar neutral">
+            <div class="ear left"></div>
+            <div class="ear right"></div>
+            <div class="face">
+              <span class="eye"></span>
+              <span class="eye"></span>
+            </div>
+            <div id="dogMouth" class="mouth"></div>
+          </div>
+
+          <div class="reaction-card">
+            <span>Selected internal module</span>
+            <strong id="reactionName">Waiting</strong>
+            <p id="reactionText">High score celebrates. Mid score nods. Low score lies down and cries.</p>
+          </div>
+
+          <div class="module-stack">
+            <div>
+              <span>01</span>
+              <strong>Evidence Capture</strong>
+              <p id="captureModule">Waiting for transcript or frames.</p>
+            </div>
+            <div>
+              <span>02</span>
+              <strong>AI Judge</strong>
+              <p id="judgeModule">Waiting for score.</p>
+            </div>
+            <div>
+              <span>03</span>
+              <strong>Score Router</strong>
+              <p id="routerModule">No reaction selected.</p>
+            </div>
+            <div>
+              <span>04</span>
+              <strong>Go2 Bridge</strong>
+              <p id="bridgeModule">Dry-run until bridge is configured.</p>
+            </div>
+          </div>
+
+          <div class="command-box">
+            <h3>Internal action module</h3>
+            <pre id="commandOutput">Waiting for score...</pre>
+            <div class="command-actions">
+              <button id="copyBtn" class="ghost-btn" type="button">Copy command</button>
+              <button id="sendGo2Btn" class="ghost-btn" type="button">Send reaction</button>
+            </div>
+          </div>
+        </aside>
+      </section>
+
+      <section class="timeline panel">
+        <div class="panel-head">
+          <h2>Live event log</h2>
+          <button id="clearBtn" class="ghost-btn" type="button">Clear</button>
+        </div>
+        <div id="timelineItems" class="timeline-items"></div>
+      </section>
+    </main>
+
+    <script src="./app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,22 @@
+{
+  "name": "go2-demo-judge",
+  "version": "1.0.0",
+  "description": "JudgeDog Go2 - Online submission hackathon demo with embodied robot feedback",
+  "main": "serve.mjs",
+  "scripts": {
+    "start": "node serve.mjs",
+    "build:mac": "pkg . --targets node18-macos-x64 --output dist/go2-demo-judge-mac"
+  },
+  "bin": "serve.mjs",
+  "pkg": {
+    "assets": [
+      "index.html",
+      "styles.css",
+      "app.js"
+    ]
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "pkg": "^5.8.1"
+  }
+}

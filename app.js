@@ -355,7 +355,7 @@ function judge(source = "manual") {
 async function judgeWithModel(source = "model") {
   const projectName = $("projectName").value.trim();
   const transcript = $("pitchText").value.trim();
-  $("judgeStatus").textContent = "Calling MiniMax...";
+  $("judgeStatus").textContent = "Calling Claude...";
 
   try {
     const response = await fetch("/api/judge", {
@@ -414,7 +414,7 @@ async function refreshHealth() {
     const response = await fetch("/api/health");
     const health = await response.json();
     const bridge = health.go2ReactionServer ? "Real bridge configured" : "Demo mode";
-    const model = health.dimosJudgeServer ? "dimos-minimax" : health.minimaxConfigured ? health.model : "MiniMax not configured";
+    const model = health.anthropicConfigured ? health.model : "local fallback";
     $("bridgeStatus").textContent = bridge;
     $("bridgeDetail").textContent = `Robot ${health.robotIp}; scoring ${model}; real actions ${
       health.go2ReactionEnabled || health.go2ReactionServer ? "available when armed" : "off by default"
@@ -710,7 +710,7 @@ async function sendGo2Reaction(reaction = reactionNameForScore(state.lastScore),
 function toggleModelJudge() {
   state.modelJudge = !state.modelJudge;
   $("modelBtn").textContent = state.modelJudge ? "Model judge on" : "Model judge off";
-  addTimeline(state.modelJudge ? "MiniMax scoring enabled" : "Local scoring enabled");
+  addTimeline(state.modelJudge ? "Claude scoring enabled" : "Local scoring enabled");
 }
 
 async function runJudge(source = "manual") {
@@ -756,7 +756,7 @@ async function speakVerdict() {
     `I scored this project ${state.lastScore || "--"}. ${$("reactionText").textContent}`;
 
   try {
-    $("judgeStatus").textContent = "Generating MiniMax voice...";
+    $("judgeStatus").textContent = "Generating Claude voice...";
     const response = await fetch("/api/speak", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -766,10 +766,10 @@ async function speakVerdict() {
     if (!response.ok) throw new Error(payload.error || "TTS failed");
     const audio = new Audio(payload.audio);
     await audio.play();
-    $("judgeStatus").textContent = "MiniMax voice played";
-    addTimeline("Played MiniMax verdict voice");
+    $("judgeStatus").textContent = "Claude voice played";
+    addTimeline("Played Claude verdict voice");
   } catch (error) {
-    addTimeline(`MiniMax TTS failed, using browser voice: ${error.message}`);
+    addTimeline(`Claude TTS not available, using browser voice: ${error.message}`);
     browserSpeak(text);
     $("judgeStatus").textContent = "Browser voice fallback";
   }

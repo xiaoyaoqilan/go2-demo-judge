@@ -31,19 +31,7 @@
         </div>
       </section>
 
-      <section class="demo-strip">
-        <article>
-          <span>Preset</span>
-          <strong>Strong Pitch</strong>
-          <p>Load a high-scoring pitch, then route it through the same action pipeline.</p>
-          <button id="highDemoBtn" class="ghost-btn" type="button">Load 92 preset</button>
-        </article>
-        <article>
-          <span>Preset</span>
-          <strong>Weak Evidence</strong>
-          <p>Load an under-proven pitch, then route it to a skeptical Go2 reaction.</p>
-          <button id="skepticalDemoBtn" class="ghost-btn" type="button">Load 72 preset</button>
-        </article>
+      <section class="demo-strip app-hidden" aria-hidden="true">
         <article class="bridge-card">
           <span>Robot Link</span>
           <strong id="bridgeStatus">Checking bridge...</strong>
@@ -55,7 +43,6 @@
         <aside class="panel input-panel">
           <div class="panel-head">
             <h2>Online Scoring Input</h2>
-            <button id="loadSampleBtn" class="ghost-btn" type="button">Sample</button>
           </div>
 
           <label class="field">
@@ -63,43 +50,19 @@
             <input id="projectName" value="Untitled Hack" placeholder="Team or project name" />
           </label>
 
-          <div class="capture-grid">
-            <button id="micBtn" class="ghost-btn" type="button">Start mic</button>
-            <button id="go2ViewBtn" class="ghost-btn" type="button">Start Go2 view capture</button>
-            <button id="cameraBtn" class="ghost-btn" type="button">Use laptop camera</button>
-            <button id="snapshotBtn" class="ghost-btn" type="button">Snapshot</button>
-            <button id="pasteShotBtn" class="ghost-btn" type="button">Paste Go2 screenshot</button>
-            <button id="autoBtn" class="ghost-btn" type="button">Auto judge off</button>
-            <button id="modelBtn" class="ghost-btn" type="button">Model judge on</button>
-            <button id="speakBtn" class="ghost-btn" type="button">Speak verdict</button>
-            <button id="liveBtn" class="primary-btn" type="button">Start capture</button>
-            <button id="go2Btn" class="dispatch-btn" type="button">Robot dispatch: OFF</button>
-            <button id="voiceBtn" class="ghost-btn" type="button">Voice reaction on</button>
-          </div>
-
-          <div class="go2-links">
-            <a href="http://127.0.0.1:9090/?url=rerun%2Bhttp%3A%2F%2F127.0.0.1%3A9877%2Fproxy" target="_blank">Open Go2 Rerun Camera</a>
-            <a href="http://127.0.0.1:7779" target="_blank">Open dimos Web View</a>
-          </div>
-
-          <div id="cameraBox" class="camera-box" data-source="GO2 VIEW">
-            <video id="cameraPreview" autoplay muted playsinline></video>
-            <canvas id="snapshotCanvas"></canvas>
-          </div>
-
           <label class="field">
             <span>Transcript / pitch text</span>
-            <textarea id="pitchText" placeholder="Paste pitch text, or use Start mic for live transcription."></textarea>
+            <textarea id="pitchText" placeholder="Paste the pitch, transcript, or project description here."></textarea>
           </label>
 
           <label class="field">
-            <span>Manual screenshots</span>
-            <input id="screenshotInput" type="file" accept="image/*" multiple />
+            <span>Visual evidence</span>
+            <input id="screenshotInput" type="file" accept="image/*,video/*" multiple />
           </label>
 
           <div id="screenshots" class="screenshots"></div>
 
-          <button id="scoreBtn" class="primary-btn" type="button">Judge & dispatch</button>
+          <button id="scoreBtn" class="ghost-btn fallback-analyze" type="button">Analyze again</button>
         </aside>
 
         <section class="panel score-panel">
@@ -129,7 +92,6 @@
         <aside class="panel dog-panel">
           <div class="panel-head">
             <h2>Action Router</h2>
-            <button id="safeModeBtn" class="safe-on" type="button">Safe mode on</button>
           </div>
 
           <div id="dogAvatar" class="dog-avatar neutral">
@@ -173,17 +135,15 @@
           </div>
 
           <div class="command-box">
-            <h3>Internal action module</h3>
-            <pre id="commandOutput">Waiting for score...</pre>
+            <pre id="commandOutput" class="app-hidden" aria-hidden="true">Waiting for score...</pre>
             <div class="command-actions">
-              <button id="copyBtn" class="ghost-btn" type="button">Copy command</button>
               <button id="sendGo2Btn" class="ghost-btn" type="button">Send reaction</button>
             </div>
           </div>
         </aside>
       </section>
 
-      <section class="timeline panel">
+      <section class="timeline panel app-hidden" aria-hidden="true">
         <div class="panel-head">
           <h2>Live event log</h2>
           <button id="clearBtn" class="ghost-btn" type="button">Clear</button>

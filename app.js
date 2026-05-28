@@ -1,33 +1,35 @@
 const rubric = [
   {
-    key: "innovation",
-    label: "Innovation",
+    key: "mission_fit",
+    label: "Mission Fit",
+    description: "Does this task truly suit a robotic dog?",
+    detail: "(based on the setup and hardware of this type of Unitree dog)",
     weight: 25,
-    keywords: ["novel", "unique", "first", "new", "different", "original", "innovation", "embodied"],
+    keywords: ["mission", "task", "suit", "robotic dog", "go2", "unitree", "environment", "hardware"],
   },
   {
-    key: "technical_completion",
-    label: "Technical completion",
+    key: "action_feasibility",
+    label: "Action Feasibility",
+    description: "Does the shown action match what the robot dog can physically do?",
+    detail: "",
     weight: 25,
-    keywords: ["demo", "working", "built", "deployed", "api", "code", "prototype", "pipeline"],
+    keywords: ["action", "motion", "movement", "command", "webrtc", "localap", "can physically", "safe"],
   },
   {
-    key: "go2_integration",
-    label: "Go2 integration",
-    weight: 20,
-    keywords: ["go2", "unitree", "robot", "dog", "action", "bridge", "webrtc", "dimos", "hardware"],
+    key: "dog_advantage",
+    label: "Dog Advantage",
+    description: "Is there a clear reason this should outperform or out-safely replace a real dog?",
+    detail: "",
+    weight: 25,
+    keywords: ["advantage", "outperform", "replace", "real dog", "safer", "patrol", "terrain", "autonomous"],
   },
   {
-    key: "visual_evidence",
-    label: "Visual evidence",
-    weight: 15,
-    keywords: ["camera", "screenshot", "visual", "image", "frame", "rerun", "evidence", "capture"],
-  },
-  {
-    key: "demo_clarity",
-    label: "Demo clarity",
-    weight: 15,
-    keywords: ["clear", "shown", "metric", "result", "flow", "story", "presentation", "explain"],
+    key: "use_reality",
+    label: "Use Reality",
+    description: "Does the use they claim to have has real use case in real world?",
+    detail: "",
+    weight: 25,
+    keywords: ["real use", "real-world", "field", "deployment", "scenario", "setup", "use case", "practical"],
   },
 ];
 
@@ -37,7 +39,7 @@ const state = {
   modelJudge: true,
   livePitch: false,
   go2Armed: false,
-  voiceReaction: true,
+  voiceReaction: false,
   screenshots: [],
   cameraStream: null,
   cameraSource: "none",
@@ -48,6 +50,9 @@ const state = {
   lastVerdict: "",
   lastReaction: "",
   autoTimer: null,
+  judgeTimer: null,
+  judgeInFlight: false,
+  pendingJudge: false,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -248,6 +253,10 @@ function renderScores(items, total) {
         <article class="rubric-item">
           <strong>${item.label}</strong>
           <b>${item.score}/100</b>
+          <small>
+            <span>${item.description || ""}</span>
+            ${item.detail ? `<em>${item.detail}</em>` : ""}
+          </small>
           <p>${item.reason}</p>
         </article>
       `,
@@ -257,16 +266,18 @@ function renderScores(items, total) {
 
 function renderModelScores(result) {
   const dimensions = result.dimensions || {};
+  const reasons = result.dimension_reasons || {};
   const items = [
-    ["Innovation", dimensions.innovation],
-    ["Technical completion", dimensions.technical_completion],
-    ["Go2 integration", dimensions.go2_integration],
-    ["Visual evidence", dimensions.visual_evidence],
-    ["Demo clarity", dimensions.demo_clarity],
-  ].map(([label, score]) => ({
+    ["Mission Fit", "mission_fit", dimensions.mission_fit],
+    ["Action Feasibility", "action_feasibility", dimensions.action_feasibility],
+    ["Dog Advantage", "dog_advantage", dimensions.dog_advantage],
+    ["Use Reality", "use_reality", dimensions.use_reality],
+  ].map(([label, key, score]) => ({
     label,
+    description: rubric.find((item) => item.key === key)?.description || "",
+    detail: rubric.find((item) => item.key === key)?.detail || "",
     score: clamp(Math.round(Number(score || 0)), 0, 100),
-    reason: `${label}: scored by MiniMax from transcript and captured evidence.`,
+    reason: reasons[key] || "",
   }));
 
   renderScores(items, clamp(Math.round(Number(result.total_score || 0)), 0, 100));
@@ -433,27 +444,6 @@ function loadSample() {
   addTimeline("Loaded sample pitch");
 }
 
-async function loadVideoDemo(kind) {
-  const isHigh = kind === "high";
-  const score = isHigh ? 92 : 72;
-  $("projectName").value = isHigh ? "FastTrack AI Copilot" : "Prototype Navigator";
-  $("pitchText").value = isHigh
-    ? [
-        "We built a working copilot that watches a team's demo, extracts the product claim, checks the live evidence, and scores it against a hackathon rubric.",
-        "The prototype includes a web judge panel, speech transcript, visual evidence, model scoring, Go2 robot reactions, and a recorded hardware validation flow.",
-        "The strongest part is the embodied feedback loop. The robot does not only show a number. It celebrates strong demos and makes the judging moment memorable.",
-      ].join("\n\n")
-    : [
-        "Our project explores automatic demo judging, but the current build is still early. We have the idea, the UI mock, and a partial local scoring flow.",
-        "The hardware connection is not fully stable yet, and we still need clearer benchmarks, stronger tests, and a better proof that the model cannot be tricked by presentation wording.",
-        "The concept is promising, but the evidence is incomplete.",
-      ].join("\n\n");
-
-  $("manualScore").value = String(score);
-  addTimeline(`Loaded ${score}+ submitted video scenario`);
-  await triggerManualScore();
-}
-
 async function refreshHealth() {
   try {
     const response = await fetch("/api/health");
@@ -555,19 +545,28 @@ function takeSnapshot() {
 function renderScreenshots() {
   $("screenshots").innerHTML = "";
   state.screenshots.forEach((shot) => {
-    const img = document.createElement("img");
-    img.src = shot.dataUrl;
-    img.alt = shot.name;
-    $("screenshots").appendChild(img);
+    if (shot.type?.startsWith("video/")) {
+      const video = document.createElement("video");
+      video.src = shot.dataUrl;
+      video.title = shot.name;
+      video.controls = true;
+      video.muted = true;
+      $("screenshots").appendChild(video);
+    } else {
+      const img = document.createElement("img");
+      img.src = shot.dataUrl;
+      img.alt = shot.name;
+      $("screenshots").appendChild(img);
+    }
   });
 }
 
-function addScreenshot(dataUrl, name = `go2-shot-${Date.now()}.png`) {
-  state.screenshots.unshift({ name, dataUrl });
+function addScreenshot(dataUrl, name = `go2-shot-${Date.now()}.png`, type = "image/png") {
+  state.screenshots.unshift({ name, dataUrl, type });
   state.screenshots = state.screenshots.slice(0, 8);
   renderScreenshots();
-  addTimeline(`Added Go2 screenshot: ${name}`);
-  if (state.autoJudge) runJudge("go2-screenshot");
+  addTimeline(`Added visual evidence: ${name}`);
+  if (state.autoJudge) runJudge("visual-evidence");
 }
 
 async function pasteGo2Screenshot() {
@@ -597,7 +596,8 @@ function handleScreenshots(event) {
   files.forEach((file) => {
     const reader = new FileReader();
     reader.onload = () => {
-      addScreenshot(reader.result, file.name);
+      addScreenshot(reader.result, file.name, file.type);
+      scheduleJudge();
     };
     reader.readAsDataURL(file);
   });
@@ -754,12 +754,29 @@ function toggleModelJudge() {
   addTimeline(state.modelJudge ? "MiniMax scoring enabled" : "Local scoring enabled");
 }
 
-function runJudge(source = "manual") {
+async function runJudge(source = "manual") {
+  if (state.judgeInFlight) {
+    state.pendingJudge = true;
+    return;
+  }
+  state.judgeInFlight = true;
   if (state.modelJudge) {
-    judgeWithModel(source);
+    await judgeWithModel(source);
   } else {
     judge(source);
   }
+  state.judgeInFlight = false;
+  if (state.pendingJudge) {
+    state.pendingJudge = false;
+    scheduleJudge();
+  }
+}
+
+function scheduleJudge() {
+  window.clearTimeout(state.judgeTimer);
+  const hasText = $("pitchText").value.trim().length > 20;
+  if (!hasText && state.screenshots.length === 0) return;
+  state.judgeTimer = window.setTimeout(() => runJudge("live-input"), 1200);
 }
 
 function browserSpeak(text) {
@@ -799,15 +816,6 @@ async function speakVerdict() {
   }
 }
 
-function toggleSafeMode() {
-  state.safeMode = !state.safeMode;
-  const btn = $("safeModeBtn");
-  btn.textContent = state.safeMode ? "Safe mode on" : "Safe mode off";
-  btn.className = state.safeMode ? "safe-on" : "safe-off";
-  addTimeline(state.safeMode ? "Safe mode enabled" : "Safe mode disabled");
-  if (state.lastScore) renderDog(reactionForScore(state.lastScore), state.lastScore);
-}
-
 function addTimeline(label) {
   const time = new Date().toLocaleTimeString("en-US", { hour12: false });
   const entry = document.createElement("div");
@@ -821,43 +829,31 @@ function clamp(value, min, max) {
 }
 
 $("scoreBtn").addEventListener("click", () => runJudge("manual"));
-$("loadSampleBtn").addEventListener("click", () => {
-  loadSample();
-  runJudge("sample");
-});
-$("highDemoBtn").addEventListener("click", () => loadVideoDemo("high"));
-$("skepticalDemoBtn").addEventListener("click", () => loadVideoDemo("skeptical"));
+$("pitchText").addEventListener("input", scheduleJudge);
+$("pitchText").addEventListener("keyup", scheduleJudge);
+$("pitchText").addEventListener("change", scheduleJudge);
+$("pitchText").addEventListener("blur", scheduleJudge);
+$("pitchText").addEventListener("drop", () => window.setTimeout(scheduleJudge, 50));
+$("pitchText").addEventListener("paste", () => window.setTimeout(scheduleJudge, 50));
+$("projectName").addEventListener("input", scheduleJudge);
+$("projectName").addEventListener("change", scheduleJudge);
 $("screenshotInput").addEventListener("change", handleScreenshots);
-$("safeModeBtn").addEventListener("click", toggleSafeMode);
-$("cameraBtn").addEventListener("click", startCamera);
-$("go2ViewBtn").addEventListener("click", startGo2ViewCapture);
-$("snapshotBtn").addEventListener("click", takeSnapshot);
-$("pasteShotBtn").addEventListener("click", pasteGo2Screenshot);
-$("micBtn").addEventListener("click", toggleMic);
-$("autoBtn").addEventListener("click", toggleAutoJudge);
-$("modelBtn").addEventListener("click", toggleModelJudge);
-$("speakBtn").addEventListener("click", speakVerdict);
-$("liveBtn").addEventListener("click", startLivePitch);
-$("go2Btn").addEventListener("click", toggleGo2Armed);
-$("voiceBtn").addEventListener("click", toggleVoiceReaction);
 $("sendGo2Btn").addEventListener("click", () => sendGo2Reaction());
 $("manualScoreBtn").addEventListener("click", triggerManualScore);
 $("clearBtn").addEventListener("click", () => {
   $("timelineItems").innerHTML = "";
-});
-$("copyBtn").addEventListener("click", async () => {
-  await navigator.clipboard.writeText(state.lastCommand || "");
-  addTimeline("Copied robot command");
 });
 
 window.addEventListener("paste", (event) => {
   const file = Array.from(event.clipboardData?.files || []).find((item) => item.type.startsWith("image/"));
   if (!file) return;
   const reader = new FileReader();
-  reader.onload = () => addScreenshot(reader.result, file.name || "go2-paste.png");
+  reader.onload = () => {
+    addScreenshot(reader.result, file.name || "go2-paste.png");
+    scheduleJudge();
+  };
   reader.readAsDataURL(file);
 });
 
-setupSpeechRecognition();
-loadVideoDemo("high");
+loadSample();
 refreshHealth();

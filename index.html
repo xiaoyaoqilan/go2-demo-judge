@@ -4,36 +4,38 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>JudgeDog Go2</title>
-    <link rel="icon" type="image/png" href="./judgedoggo_logo_pink_v3.png" />
+    <link rel="icon" type="image/png" href="./judgedoggo_paw_icon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900;950&family=Fredoka+One&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
+    <video class="bg-video" autoplay muted loop playsinline>
+      <source src="./f_ce_b_c_f_b_e_c_cbmp_.mp4" type="video/mp4" />
+    </video>
     <main class="shell">
       <header class="topbar">
         <div class="topbar-brand">
-          <img src="./judgedoggo_logo_pink_v3.png" alt="JudgeDog logo" class="topbar-logo" />
-          <div>
+          <img src="./judgedoggo_friendly_text.png" alt="JudgeDoggo" class="topbar-mascot" />
+          <div class="topbar-meta">
             <p class="eyebrow">Online Submission Build</p>
-            <h1>JudgeDog Go2</h1>
+            <h1>Go2 Judge</h1>
+            <p class="topbar-sub">Multimodal hackathon judge for Unitree Go2</p>
           </div>
         </div>
-        <div class="status-strip">
-          <span id="judgeStatus">Local scoring ready</span>
-          <span id="dogStatus">Go2: standby</span>
+        <div class="topbar-right">
+          <div class="proof-chips">
+            <span>Online scorer</span>
+            <span>Action router</span>
+            <span>Go2 bridge</span>
+          </div>
+          <div class="status-strip">
+            <span id="judgeStatus">Local scoring ready</span>
+            <span id="dogStatus">Go2: standby</span>
+          </div>
         </div>
       </header>
-
-      <section class="submission-brief">
-        <div>
-          <strong>Multimodal hackathon judge for Unitree Go2</strong>
-          <p>Web demo scores pitch text and visual evidence. Submitted videos validate the real robot reactions.</p>
-        </div>
-        <div class="proof-chips">
-          <span>Online scorer</span>
-          <span>Internal action router</span>
-          <span>Go2 hardware bridge</span>
-        </div>
-      </section>
 
       <section class="demo-strip app-hidden" aria-hidden="true">
         <article class="bridge-card">
@@ -85,18 +87,11 @@
 
         <aside class="panel dog-panel">
           <div class="panel-head">
-            <h2>Action Router</h2>
+            <h2>JudgeDoggo</h2>
+            <img src="./judgedoggo_paw_icon.png" class="panel-paw" alt="" />
           </div>
 
-          <div id="dogAvatar" class="dog-avatar neutral">
-            <div class="ear left"></div>
-            <div class="ear right"></div>
-            <div class="face">
-              <span class="eye"></span>
-              <span class="eye"></span>
-            </div>
-            <div id="dogMouth" class="mouth"></div>
-          </div>
+          <div id="dogAvatar" class="dog-avatar neutral"></div>
 
           <div class="reaction-card">
             <span>Selected internal module</span>
@@ -123,6 +118,9 @@
       </section>
     </main>
 
+    <script src="https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.2/dist/gsap.min.js"></script>
+    <script src="./dog3d.js"></script>
     <script src="./app.js"></script>
   </body>
 </html>

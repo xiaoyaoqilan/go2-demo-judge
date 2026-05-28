@@ -320,6 +320,7 @@ function renderDog(reaction, score) {
       : "";
   state.lastCommand = reaction.command + safeNote;
   $("commandOutput").textContent = state.lastCommand;
+  if (window.setDogReaction) window.setDogReaction(reaction.className);
 }
 
 async function maybeReact(score, source = "manual", options = {}) {
@@ -355,7 +356,7 @@ function judge(source = "manual") {
 async function judgeWithModel(source = "model") {
   const projectName = $("projectName").value.trim();
   const transcript = $("pitchText").value.trim();
-  $("judgeStatus").textContent = "Calling Claude...";
+  $("judgeStatus").textContent = "Calling Kimi...";
 
   try {
     const response = await fetch("/api/judge", {
@@ -374,8 +375,25 @@ async function judgeWithModel(source = "model") {
     const total = clamp(Math.round(Number(result.total_score || 0)), 0, 100);
     const reaction = reactionForScore(total);
     state.lastScore = total;
-    state.lastVerdict = result.verdict || `${projectName || "This project"} scored ${total}.`;
 
+    if (payload.provider === "local-fallback") {
+      const reason = result.error || "Claude API unavailable";
+      $("judgeStatus").textContent = `Kimi unavailable — ${reason.slice(0, 60)}`;
+      addTimeline(`Kimi unavailable: ${reason}`);
+      const items = rubric.map((item) => ({
+        ...item,
+        score: result.dimensions?.[item.key] ?? total,
+        reason: `${item.label}: Kimi not available. ${result.dimension_reasons?.[item.key] || ""}`.trim(),
+      }));
+      renderScores(items, total);
+      renderEvidence(projectName, transcript, state.screenshots.length, total);
+      renderDog(reaction, total);
+      renderActionModules({ source, score: total, reaction, provider: "local fallback", dispatched: state.go2Armed });
+      await maybeReact(total, source);
+      return;
+    }
+
+    state.lastVerdict = result.verdict || `${projectName || "This project"} scored ${total}.`;
     renderModelScores(result);
     renderModelEvidence(result, payload.provider);
     renderDog(reaction, total);
@@ -388,13 +406,8 @@ async function judgeWithModel(source = "model") {
     await maybeReact(total, source);
   } catch (error) {
     addTimeline(`Model judge failed: ${error.message}`);
-    $("judgeStatus").textContent = "MiniMax unavailable";
-    $("dogStatus").textContent = "Go2: waiting for real score";
-    setEvidenceItems([
-      "MiniMax did not return a real model judgment.",
-      "No fallback score was generated.",
-      `Reason: ${error.message}`,
-    ]);
+    $("judgeStatus").textContent = `Error: ${error.message.slice(0, 60)}`;
+    judge(source);
   }
 }
 
@@ -414,7 +427,7 @@ async function refreshHealth() {
     const response = await fetch("/api/health");
     const health = await response.json();
     const bridge = health.go2ReactionServer ? "Real bridge configured" : "Demo mode";
-    const model = health.anthropicConfigured ? health.model : "local fallback";
+    const model = health.kimiConfigured ? health.model : "local fallback";
     $("bridgeStatus").textContent = bridge;
     $("bridgeDetail").textContent = `Robot ${health.robotIp}; scoring ${model}; real actions ${
       health.go2ReactionEnabled || health.go2ReactionServer ? "available when armed" : "off by default"
@@ -710,7 +723,7 @@ async function sendGo2Reaction(reaction = reactionNameForScore(state.lastScore),
 function toggleModelJudge() {
   state.modelJudge = !state.modelJudge;
   $("modelBtn").textContent = state.modelJudge ? "Model judge on" : "Model judge off";
-  addTimeline(state.modelJudge ? "Claude scoring enabled" : "Local scoring enabled");
+  addTimeline(state.modelJudge ? "Kimi scoring enabled" : "Local scoring enabled");
 }
 
 async function runJudge(source = "manual") {
@@ -756,7 +769,7 @@ async function speakVerdict() {
     `I scored this project ${state.lastScore || "--"}. ${$("reactionText").textContent}`;
 
   try {
-    $("judgeStatus").textContent = "Generating Claude voice...";
+    $("judgeStatus").textContent = "Generating Kimi voice...";
     const response = await fetch("/api/speak", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -769,7 +782,7 @@ async function speakVerdict() {
     $("judgeStatus").textContent = "Claude voice played";
     addTimeline("Played Claude verdict voice");
   } catch (error) {
-    addTimeline(`Claude TTS not available, using browser voice: ${error.message}`);
+    addTimeline(`Kimi TTS not available, using browser voice: ${error.message}`);
     browserSpeak(text);
     $("judgeStatus").textContent = "Browser voice fallback";
   }

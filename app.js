@@ -347,6 +347,7 @@ function judge(source = "manual") {
   const reaction = reactionForScore(total);
 
   state.lastScore = total;
+  $("verdictText").style.display = "none";
   renderScores(items, total);
   renderEvidence(projectName, text, state.screenshots.length, total);
   renderDog(reaction, total);
@@ -407,6 +408,9 @@ async function judgeWithModel(source = "model") {
     renderModelScores(result);
     renderModelEvidence(result, payload.provider);
     renderDog(reaction, total);
+    const verdictEl = $("verdictText");
+    verdictEl.textContent = state.lastVerdict;
+    verdictEl.style.display = "";
     renderActionModules({ source, score: total, reaction, provider: payload.provider, dispatched: state.go2Armed });
     $("judgeStatus").textContent = `Scored by ${payload.provider}`;
     $("dogStatus").textContent = `Go2: ${reaction.name}`;

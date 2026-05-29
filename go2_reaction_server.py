@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import base64
+import io
 import json
 import os
 import threading
@@ -348,10 +350,22 @@ class Go2ReactionController:
         self.method = method
         self.conn: UnitreeWebRTCConnection | None = None
         self.lock = asyncio.Lock()
+        self.latest_frame: Any = None
+        self._video_started = False
+        self._video_consumer_task: asyncio.Task[Any] | None = None
 
     async def connect(self) -> None:
-        if self.conn is not None:
+        if self.conn is not None and getattr(self.conn, "isConnected", False):
             return
+        if self.conn is not None:
+            print("Detected stale Go2 connection; reconnecting", flush=True)
+            try:
+                await self.conn.disconnect()
+            except Exception:
+                pass
+            self.conn = None
+            self.latest_frame = None
+            self._video_started = False
         connection_method = getattr(WebRTCConnectionMethod, self.method)
         kwargs: dict[str, Any] = {}
         if self.method != "LocalAP":
@@ -393,6 +407,50 @@ class Go2ReactionController:
             payload["parameter"] = parameter
         print(f"SPORT {command} {parameter or ''}".strip(), flush=True)
         await self.conn.datachannel.pub_sub.publish_request_new(RTC_TOPIC["SPORT_MOD"], payload)
+
+    async def _ensure_video(self) -> None:
+        if self._video_started:
+            return
+        await self.connect()
+        assert self.conn is not None
+
+        async def consume(track: Any) -> None:
+            while True:
+                try:
+                    frame = await track.recv()
+                except Exception as exc:
+                    print(f"Video track recv ended: {exc}", flush=True)
+                    return
+                self.latest_frame = frame
+
+        self.conn.video.add_track_callback(consume)
+        self.conn.video.switchVideoChannel(True)
+        self._video_started = True
+        print("Video channel enabled; waiting for frames", flush=True)
+
+    async def snapshot(self, max_width: int = 1280, quality: int = 82) -> dict[str, Any]:
+        async with self.lock:
+            await self._ensure_video()
+            for _ in range(80):
+                if self.latest_frame is not None:
+                    break
+                await asyncio.sleep(0.1)
+            if self.latest_frame is None:
+                raise RuntimeError("Go2 did not produce a video frame; check the robot camera")
+            frame = self.latest_frame
+            image = frame.to_image()
+            if image.width > max_width:
+                new_height = round(image.height * (max_width / image.width))
+                image = image.resize((max_width, new_height))
+            buf = io.BytesIO()
+            image.convert("RGB").save(buf, format="JPEG", quality=quality)
+            b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+            return {
+                "image": f"data:image/jpeg;base64,{b64}",
+                "width": image.width,
+                "height": image.height,
+                "ip": self.ip,
+            }
 
     async def react(self, reaction: str, unsafe: bool = False) -> dict[str, Any]:
         if reaction in STUNT_REACTIONS and not unsafe:
@@ -440,7 +498,16 @@ class Go2ReactionController:
                 else:
                     await self.sport(command)
                 await asyncio.sleep(1.0)
+            await self._recover_to_balance_stand()
         return {"ok": True, "reaction": reaction, "ip": self.ip}
+
+    async def _recover_to_balance_stand(self) -> None:
+        await asyncio.sleep(0.8)
+        await self.sport("StopMove")
+        await asyncio.sleep(0.4)
+        await self.sport("RecoveryStand")
+        await asyncio.sleep(1.8)
+        await self.sport("BalanceStand")
 
 
 def make_handler(loop: asyncio.AbstractEventLoop, controller: Go2ReactionController):
@@ -480,6 +547,14 @@ def make_handler(loop: asyncio.AbstractEventLoop, controller: Go2ReactionControl
             if self.path == "/judge":
                 try:
                     self._send(200, judge_payload(payload))
+                except Exception as exc:
+                    self._send(500, {"error": str(exc)})
+                return
+
+            if self.path == "/snapshot":
+                try:
+                    future = asyncio.run_coroutine_threadsafe(controller.snapshot(), loop)
+                    self._send(200, future.result(timeout=15))
                 except Exception as exc:
                     self._send(500, {"error": str(exc)})
                 return

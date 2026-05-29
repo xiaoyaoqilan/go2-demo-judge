@@ -14,6 +14,7 @@ const types = {
   ".png": "image/png",
   ".jpg": "image/jpeg",
   ".jpeg": "image/jpeg",
+  ".mp4": "video/mp4",
 };
 
 function sendJson(res, status, body) {
@@ -225,6 +226,27 @@ async function handleApi(req, res, pathname) {
       const payload = await readJson(req);
       const audio = await callMiniMaxSpeech(payload.text);
       sendJson(res, 200, { audio });
+      return;
+    }
+
+    if (pathname === "/api/snapshot" && req.method === "POST") {
+      const reactionServer = process.env.GO2_REACTION_SERVER;
+      if (!reactionServer) {
+        sendJson(res, 400, { error: "GO2_REACTION_SERVER is not configured; cannot reach Go2 camera" });
+        return;
+      }
+      try {
+        const upstream = await fetchWithTimeout(
+          `${reactionServer.replace(/\/$/, "")}/snapshot`,
+          { method: "POST", headers: { "content-type": "application/json" }, body: "{}" },
+          20000,
+        );
+        const text = await upstream.text();
+        const data = text ? JSON.parse(text) : {};
+        sendJson(res, upstream.ok ? 200 : 502, data);
+      } catch (error) {
+        sendJson(res, 502, { error: error.message });
+      }
       return;
     }
 

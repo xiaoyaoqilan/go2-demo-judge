@@ -320,6 +320,7 @@ function renderDog(reaction, score) {
       : "";
   state.lastCommand = reaction.command + safeNote;
   $("commandOutput").textContent = state.lastCommand;
+  if (window.setDogReaction) window.setDogReaction(reaction.className);
 }
 
 async function maybeReact(score, source = "manual", options = {}) {
@@ -374,8 +375,25 @@ async function judgeWithModel(source = "model") {
     const total = clamp(Math.round(Number(result.total_score || 0)), 0, 100);
     const reaction = reactionForScore(total);
     state.lastScore = total;
-    state.lastVerdict = result.verdict || `${projectName || "This project"} scored ${total}.`;
 
+    if (payload.provider === "local-fallback") {
+      const reason = result.error || "MiniMax API unavailable";
+      $("judgeStatus").textContent = `MiniMax unavailable — ${reason.slice(0, 60)}`;
+      addTimeline(`MiniMax unavailable: ${reason}`);
+      const items = rubric.map((item) => ({
+        ...item,
+        score: result.dimensions?.[item.key] ?? total,
+        reason: `${item.label}: MiniMax not available. ${result.dimension_reasons?.[item.key] || ""}`.trim(),
+      }));
+      renderScores(items, total);
+      renderEvidence(projectName, transcript, state.screenshots.length, total);
+      renderDog(reaction, total);
+      renderActionModules({ source, score: total, reaction, provider: "local fallback", dispatched: state.go2Armed });
+      await maybeReact(total, source);
+      return;
+    }
+
+    state.lastVerdict = result.verdict || `${projectName || "This project"} scored ${total}.`;
     renderModelScores(result);
     renderModelEvidence(result, payload.provider);
     renderDog(reaction, total);
@@ -388,13 +406,8 @@ async function judgeWithModel(source = "model") {
     await maybeReact(total, source);
   } catch (error) {
     addTimeline(`Model judge failed: ${error.message}`);
-    $("judgeStatus").textContent = "MiniMax unavailable";
-    $("dogStatus").textContent = "Go2: waiting for real score";
-    setEvidenceItems([
-      "MiniMax did not return a real model judgment.",
-      "No fallback score was generated.",
-      `Reason: ${error.message}`,
-    ]);
+    $("judgeStatus").textContent = `Error: ${error.message.slice(0, 60)}`;
+    judge(source);
   }
 }
 
@@ -553,6 +566,28 @@ async function pasteGo2Screenshot() {
     addTimeline("Clipboard has no image. Use Win+Shift+S on the Go2 page, then paste here.");
   } catch (error) {
     addTimeline(`Paste Go2 screenshot failed: ${error.message}`);
+  }
+}
+
+async function captureFromGo2() {
+  const btn = $("captureGo2Btn");
+  const originalLabel = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "Capturing from Go2...";
+  addTimeline("Requesting Go2 camera frame");
+  try {
+    const response = await fetch("/api/snapshot", { method: "POST" });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data.image) {
+      throw new Error(data.error || `Snapshot failed (${response.status})`);
+    }
+    addScreenshot(data.image, `go2-${Date.now()}.jpg`, "image/jpeg");
+    scheduleJudge();
+  } catch (error) {
+    addTimeline(`Go2 capture failed: ${error.message}`);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = originalLabel;
   }
 }
 
@@ -769,7 +804,7 @@ async function speakVerdict() {
     $("judgeStatus").textContent = "MiniMax voice played";
     addTimeline("Played MiniMax verdict voice");
   } catch (error) {
-    addTimeline(`MiniMax TTS failed, using browser voice: ${error.message}`);
+    addTimeline(`MiniMax TTS not available, using browser voice: ${error.message}`);
     browserSpeak(text);
     $("judgeStatus").textContent = "Browser voice fallback";
   }
@@ -797,6 +832,7 @@ $("pitchText").addEventListener("paste", () => window.setTimeout(scheduleJudge, 
 $("projectName").addEventListener("input", scheduleJudge);
 $("projectName").addEventListener("change", scheduleJudge);
 $("screenshotInput").addEventListener("change", handleScreenshots);
+$("captureGo2Btn").addEventListener("click", () => captureFromGo2());
 $("sendGo2Btn").addEventListener("click", () => sendGo2Reaction());
 $("clearBtn").addEventListener("click", () => {
   $("timelineItems").innerHTML = "";
